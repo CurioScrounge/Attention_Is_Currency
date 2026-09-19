@@ -3,6 +3,7 @@ const DEFAULT_CATEGORIES = {
     name: "Video & Media",
     domains: ["youtube.com", "bilibili.com"],
     redirectUrl: "",
+    excludedDomains: ["music.youtube.com"],
     iconUrl: "",
     timerMinutes: 25
   },
@@ -10,6 +11,7 @@ const DEFAULT_CATEGORIES = {
     name: "Comics & Novels",
     domains: ["asuracomic.net", "manganato.com", "novelupdates.com"],
     redirectUrl: "",
+    excludedDomains: [],
     iconUrl: "",
     timerMinutes: 25
   }
@@ -65,6 +67,11 @@ function renderCategories(categories) {
   container.innerHTML = "";
 
   Object.entries(categories).forEach(([key, category]) => {
+    // Ensure fallback for legacy data without excludedDomains
+    if (!category.excludedDomains) {
+      category.excludedDomains = [];
+    }
+
     const card = document.createElement("div");
     card.className = "card";
     card.dataset.key = key;
@@ -74,6 +81,14 @@ function renderCategories(categories) {
         <span class="pill">
           ${escapeHtml(domain)}
           <span class="pill-remove" data-domain="${escapeHtml(domain)}">&times;</span>
+        </span>
+      `).join("");
+
+    const excludedDomainsHtml = category.excludedDomains
+      .map((domain) => `
+        <span class="pill pill-excluded" style="border-color: #ff0055; color: #ff0055; background: rgba(255, 0, 85, 0.1);">
+          ${escapeHtml(domain)}
+          <span class="pill-remove-excluded" data-domain="${escapeHtml(domain)}" style="cursor: pointer; margin-left: 6px;">&times;</span>
         </span>
       `).join("");
 
@@ -95,6 +110,14 @@ function renderCategories(categories) {
         <div class="domain-pills">${domainsHtml}</div>
       </div>
       <div class="form-group">
+        <label>Excluded Domains / Subdomains</label>
+        <div class="domain-input-group">
+          <input type="text" class="new-excluded-domain-input" placeholder="Add exclusion (e.g. music.youtube.com)">
+          <button type="button" class="btn btn-secondary add-excluded-domain-btn">Add Exclusion</button>
+        </div>
+        <div class="excluded-domain-pills" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">${excludedDomainsHtml}</div>
+      </div>
+      <div class="form-group">
         <label>Reroute Target URL</label>
         <input type="url" class="cat-redirect" value="${escapeHtml(category.redirectUrl)}">
       </div>
@@ -109,8 +132,8 @@ function renderCategories(categories) {
       <button type="button" class="btn btn-primary save-btn">Commit Changes</button>
     `;
 
+    // Add Target Domain
     const domainInput = card.querySelector(".new-domain-input");
-
     card.querySelector(".add-domain-btn").onclick = () => {
       const value = sanitizeDomain(domainInput.value);
       if (value && !category.domains.includes(value)) {
@@ -120,6 +143,7 @@ function renderCategories(categories) {
       }
     };
 
+    // Remove Target Domain
     card.querySelector(".domain-pills").onclick = (e) => {
       if (e.target.classList.contains("pill-remove")) {
         const domainToRemove = e.target.dataset.domain;
@@ -128,6 +152,27 @@ function renderCategories(categories) {
       }
     };
 
+    // Add Excluded Domain
+    const excludedDomainInput = card.querySelector(".new-excluded-domain-input");
+    card.querySelector(".add-excluded-domain-btn").onclick = () => {
+      const value = sanitizeDomain(excludedDomainInput.value);
+      if (value && !category.excludedDomains.includes(value)) {
+        category.excludedDomains.push(value);
+        excludedDomainInput.value = "";
+        saveAndReload(categories);
+      }
+    };
+
+    // Remove Excluded Domain
+    card.querySelector(".excluded-domain-pills").onclick = (e) => {
+      if (e.target.classList.contains("pill-remove-excluded")) {
+        const domainToRemove = e.target.dataset.domain;
+        category.excludedDomains = category.excludedDomains.filter((d) => d !== domainToRemove);
+        saveAndReload(categories);
+      }
+    };
+
+    // Save Category Settings
     card.querySelector(".save-btn").onclick = () => {
       category.name = card.querySelector(".cat-name").value.trim();
       category.redirectUrl = card.querySelector(".cat-redirect").value.trim();
@@ -136,6 +181,7 @@ function renderCategories(categories) {
       saveAndReload(categories);
     };
 
+    // Delete Category
     card.querySelector(".delete-btn").onclick = () => {
       if (confirm(`Purge category "${category.name}"?`)) {
         delete categories[key];
@@ -151,15 +197,20 @@ async function handleAddCategory(e) {
   e.preventDefault();
   const name = document.getElementById("new-cat-name").value.trim();
   const rawDomains = document.getElementById("new-cat-domains").value;
+
+  const excludedInput = document.getElementById("new-cat-excluded-domains");
+  const rawExcludedDomains = excludedInput ? excludedInput.value : "";
+
   const redirectUrl = document.getElementById("new-cat-redirect").value.trim();
   const iconUrl = document.getElementById("new-cat-icon").value.trim();
   const timerMinutes = parseInt(document.getElementById("new-cat-timer").value, 10) || 25;
 
   const key = "cat_" + Date.now();
   const domains = rawDomains.split(",").map(sanitizeDomain).filter((d) => d.length > 0);
+  const excludedDomains = rawExcludedDomains.split(",").map(sanitizeDomain).filter((d) => d.length > 0);
 
   const { categories = {} } = await chrome.storage.local.get(["categories"]);
-  categories[key] = { name, domains, redirectUrl, iconUrl, timerMinutes };
+  categories[key] = { name, domains, excludedDomains, redirectUrl, iconUrl, timerMinutes };
 
   await chrome.storage.local.set({ categories });
   document.getElementById("add-category-form").reset();

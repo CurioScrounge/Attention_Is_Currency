@@ -31,10 +31,13 @@ async function checkIntent() {
   for (const [key, cat] of Object.entries(categories)) {
     const domain = cat.domains?.find((d) => host.includes(d));
     if (domain) {
+      const isExcluded = cat.excludedDomains?.some((ex) => ex.trim() && host.includes(ex.trim()));
+      if(!isExcluded){
       matchedCategoryKey = key;
       matchedCategory = cat;
       matchedDomain = domain;
       break;
+      }
     }
   }
 
@@ -507,13 +510,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 window.addEventListener("yt-navigate-finish", checkIntent);
 
 let lastUrl = location.href;
-new MutationObserver(() => {
-  const url = location.href;
-  if (url !== lastUrl) {
-    lastUrl = url;
+setInterval(() => {
+  if (location.href !== lastUrl) {
+    lastUrl = location.href;
     checkIntent();
   }
-}).observe(document, { subtree: true, childList: true });
+}, 500);
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "SESSION_EXPIRED") {

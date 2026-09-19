@@ -3,6 +3,7 @@ const DEFAULT_CATEGORIES = {
     name: "Video & Media",
     domains: ["youtube.com", "bilibili.com"],
     redirectUrl: "",
+    excludedDomains: ["music.youtube.com"],
     iconUrl: "",
     timerMinutes: 25
   },
@@ -10,6 +11,7 @@ const DEFAULT_CATEGORIES = {
     name: "Comics & Novels",
     domains: ["asuracomic.net", "manganato.com", "novelupdates.com"],
     redirectUrl: "",
+    excludedDomains: [],
     iconUrl: "",
     timerMinutes: 25
   }
@@ -22,6 +24,19 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+function matchesDomain(urlStr, targetDomain, cat) {
+  try {
+    const hostname = new URL(urlStr).hostname;
+    const matchesTarget = hostname === targetDomain || hostname.endsWith("." + targetDomain);
+    if (!matchesTarget) return false;
+
+    const isExcluded = cat?.excludedDomains?.some((ex) => ex.trim() && (hostname === ex.trim() || hostname.endsWith("." + ex.trim())));
+    return !isExcluded;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function updateTabFocusState() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeUrl = activeTab?.url || "";
@@ -31,7 +46,7 @@ async function updateTabFocusState() {
   let activeDomain = null;
   if (activeUrl) {
     for (const cat of Object.values(categories)) {
-      const match = cat.domains?.find((d) => activeUrl.includes(d));
+      const match = cat.domains?.find((d) => matchesDomain(activeUrl, d, cat));
       if (match) {
         activeDomain = match;
         break;
@@ -68,16 +83,16 @@ async function updateTabFocusState() {
   }
 }
 
-// Automatically terminate sessions when all domain tabs are closed
 chrome.tabs.onRemoved.addListener(async () => {
   const allTabs = await chrome.tabs.query({});
-  const { sessions = {} } = await chrome.storage.local.get(["sessions"]);
+  const { categories = {}, sessions = {} } = await chrome.storage.local.get(["categories", "sessions"]);
   let updated = false;
 
   for (const [domainKey, session] of Object.entries(sessions)) {
     if (!session) continue;
+    const cat = categories[session.categoryKey];
 
-    const hasOpenTab = allTabs.some((tab) => tab.url && tab.url.includes(domainKey));
+    const hasOpenTab = allTabs.some((tab) => tab.url && matchesDomain(tab.url, domainKey, cat));
     if (!hasOpenTab) {
       delete sessions[domainKey];
       chrome.alarms.clear(`session_${domainKey}`);
@@ -110,6 +125,8 @@ chrome.runtime.onMessage.addListener((msg) => {
         lastActiveTimestamp: Date.now(),
         isPaused: false
       };
+      // Explicitly schedule initial alarm for session start
+      chrome.alarms.create(`session_${msg.domain}`, { delayInMinutes: msg.duration });
       await chrome.storage.local.set({ sessions });
       updateTabFocusState();
     });
@@ -139,7 +156,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (currentSession?.mode === "unproductive" && targetCategory && targetCategory.redirectUrl) {
     const tabs = await chrome.tabs.query({});
     tabs.forEach((tab) => {
-      if (tab.url?.includes(domainKey)) {
+      if (tab.url && matchesDomain(tab.url, domainKey, targetCategory)) {
         chrome.tabs.update(tab.id, { url: targetCategory.redirectUrl });
       }
     });
@@ -150,7 +167,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   const tabs = await chrome.tabs.query({});
   tabs.forEach((tab) => {
-    if (tab.url?.includes(domainKey)) {
+    if (tab.url && matchesDomain(tab.url, domainKey, targetCategory)) {
       chrome.tabs.sendMessage(tab.id, { type: "SESSION_EXPIRED" }).catch(() => {});
     }
   });
